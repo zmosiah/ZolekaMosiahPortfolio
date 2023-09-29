@@ -1,0 +1,467 @@
+---
+title: "Exploring Racial Bias in Early-Stage Venture Capital Funding"
+author: "Zoleka Mosiah"
+date: "09/28/2023"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_dept: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readr)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(moderndive)
+library(ggfortify)
+library(purrr)
+library(data.table)
+library(lmtest)
+library(car)
+library(DescTools)
+library(tinytex)
+investments<-read_csv("~/discrimination_in_venture/temp_data_2018-2023/investments_raw.csv", show_col_types = FALSE)
+```
+## Abstract
+The aim of this analysis is to assess whether race and gender disparities in the United States are manifested in the allocation of venture capital funding through the of early-stage funding received by founders based on their race and gender between 2018 and 2023. The findings of this analysis of 21,238 startups indicate a statistically significant difference in the amount of early-stage funding received by startups depending on the demographic of their founding and leadership teams. More specifically, companies that are black-founded or -led receive 21% less early-stage funding than their counterparts. Surprisingly, companies founded or led by women receive 8% more early-stage funding than their counterparts. In summation, this analysis provides supplementary evidence to the increasing awareness of the ways in which systemic inequality affects black founders. The model used for this analysis has an adjusted R-squared of 0.24. The model doesn't account for more specific, possibly influential company information like company age, number of founders, or founder experience could be one of the reasons for this low value. However, the results are still worth interpreting as they shed light on some of the disparities in venture capital and, given the restricted availability of private company data for this project, the results are still of value.
+
+## Introduction
+
+The world of venture capital has seen significant growth and change in recent years. In the United States in particular, we've seen a surge in programs and efforts focused on diversity and inclusion within the start-up ecosystem. However, despite the progress made in creating a more inclusive and equitable ecosystem, there are still significant disparities in funding based on factors like race and gender. Of the $150 billion in venture capital allocated to startups in 2020, only 1% was distributed to black founders^1^.
+
+This analysis takes a closer look at early-stage funding data between 2018 and 2023 to uncover the disparities in early-stage funding within the start-up ecosystem. It explores the impact that founder characteristics, industry, geographic region, and more play on the amount of early-stage funding received by start-ups in the U.S.
+
+
+## Methods
+
+### Data Sourcing
+
+The primary data used in this study is from Crunchbase, a database of private and public company data and the "leader in research, information, and prospecting for private companies"^2^. The national-level data set includes data between September 13, 2018 and September 12, 2023 and contains information about 21,238 companies including their respective investment histories, transactions and founder demographics. Hence, each observational unit represents a company in the United States.
+
+The data was collected by Crunchbase through a combination of machine learning software, crowd-sourcing, in-house researchers and Crunchbase’s venture program. The dataset was created by filtering for early-stage (seed and pre-seed) investments by industry in US-based companies.
+
+### Data Cleaning and Pre-Processing
+
+A summary of the steps taken to clean the data and prepare it for analysis is below:
+
+1. Standardized column names for consistency and ease of use during the analysis
+
+2. Parsed the 'Diversity Spotlight' column to identify racial and gender diversity attributes of company founders and leadership in order to create binary columns for each group
+
+3. Removed unnecessary columns to streamline the analysis and filter out rows missing or inconsistent data. e.g., transactions in currencies other than USD.
+
+4. Ensured columns were all of the appropriate format and extracted individual date attributes (month, year, quarter) from the date variable.
+
+5. Classified organizations into 7 large verticals: Fintech, Health, Transportation, Technology (Hardware), Software, E-Commerce, and Food & Beverage. Observations that did not fit into these primary verticals were excluded from the analysis in order to focus on broader, more generalized observations in major industries.
+
+### Ethical Considerations
+
+Diversity Spotlight is a feature that indicates race, gender, and ethnicity of the founding and leadership teams of a company. This data comes from a number of sources including Crunchbase Venture Program Partners, journalists, the Crunchbase data management team, investors, and verified startup employees^3^. Crunchbase has implemented processes for verifying diversity data but at the time of this analysis I am not aware of the details of that process. I therefore cannot ensure that founders or startup leaders have not been misgendered through this process. However, I trust that Crunchbase has through a rigorous verification process before publishing the diversity data.
+
+```{r Cleaning}
+# rename columns
+investments <- investments %>% rename(
+  org_name = Organization.Name,
+  org_description = Organization.Description,
+  funding_type = Funding.Type,
+  funding_stage = Funding.Stage,
+  transaction_amount = Money.Raised,
+  funding_date = Announced.Date,
+  diversity = Diversity.Spotlight,
+  transaction_name = Transaction.Name,
+  org_industry = Organization.Industries,
+  org_location = Organization.Location,
+  org_website = Organization.Website,
+  total_raised = Total.Funding.Amount,
+  funding_status = Funding.Status,
+  num_funding_rounds = Number.of.Funding.Rounds,
+  lead_investors = Lead.Investors,
+  num_investors = Number.of.Investors,
+  org_rev_range = Organization.Revenue.Range
+  )
+
+# DIVERSITY
+# split diversity column into gender and races
+investments$women_founded_led <- ifelse(grepl("Women", investments$diversity, fixed=TRUE), TRUE, FALSE)
+investments$black_founded_led <- ifelse(grepl("Black", investments$diversity, fixed=TRUE), TRUE, FALSE)
+investments$hispanic_latinx_founded_led <- ifelse(grepl("Hispanic", investments$diversity, fixed=TRUE), TRUE, FALSE)
+investments$s_asian_founded_led <- ifelse(grepl("South Asian", investments$diversity, fixed=TRUE), TRUE, FALSE)
+investments$se_asian_founded_led <- ifelse(grepl("Southeast Asian", investments$diversity, fixed=TRUE), TRUE, FALSE)
+investments$e_asian_founded_led <- ifelse(grepl("East Asian", investments$diversity, fixed=TRUE), TRUE, FALSE)
+investments$m_eastern_n_african_founded_led <- ifelse(grepl("Middle Eastern", investments$diversity, fixed=TRUE), TRUE, FALSE)
+investments$indigenous_founded_led <- ifelse(grepl("Native", investments$diversity, fixed=TRUE), TRUE, FALSE)
+
+# remove unnecessary columns and filter rows with transaction data
+investments <- investments %>% 
+  dplyr::select(-c(total_raised,
+            lead_investors,
+            org_rev_range,
+            funding_stage)) %>%
+  filter(is.na(transaction_amount)==FALSE,
+         str_detect(transaction_amount, '\\$'),
+         str_detect(funding_type, 'Seed|Pre-Seed'))
+
+# DATES
+# turn date column into date type
+investments$funding_date <- as.Date(investments$funding_date, format = '%b %d, %Y')
+
+# extract month, year, and quarter from funding date
+investments$funding_month <- format(investments$funding_date, "%B")
+investments$funding_year <- year(investments$funding_date)
+investments$funding_quarter <- quarter(investments$funding_date)
+
+# LOCATION
+# extract state from location
+investments$org_location <- trimws(sapply(strsplit(investments$org_location, ","), "[[",2))
+
+# convert funding from strings to numeric and remove the $ sign
+investments$transaction_amount <- as.numeric(gsub("[^0-9.]","",investments$transaction_amount))
+
+# split location into Northeast, Midwest, South and West
+states_northeast <- c("Maine", "New Hampshire", "New York", "Vermont", "Massachusetts", "Rhode Island", "Connecticut", "Pennsylvania", "New Jersey")
+states_midwest <- c("Wisconsin", "Michigan", "Illinois", "Indiana", "Ohio", "North Dakota", "South Dakota", "Nebraska", "Kansas", "Minnesota", "Iowa", "Missouri")
+states_south <- c("Delaware", "Maryland", "District of Columbia", "Virginia", "West Virginia", "North Carolina", "South Carolina", "Georgia", "Florida", "Kentucky", "Tennessee", "Mississippi", "Alabama", "Oklahoma", "Texas", "Arkansas", "Louisiana")
+states_west <- c("Idaho", "Montana", "Wyoming", "Nevada", "Utah", "Colorado", "Arizona", "New Mexico", "Alaska", "Washington", "Oregon", "California", "Hawaii")
+
+investments$region <- ifelse(investments$org_location %in% states_northeast, "Northeast",
+                             ifelse(investments$org_location %in% states_midwest, "Midwest",
+                                    ifelse(investments$org_location %in% states_south, "South", 
+                                           ifelse(investments$org_location %in% states_west, "West", ""))))
+
+# INDUSTRIES
+# make industry column lower case
+investments$org_industry <- tolower(investments$org_industry)
+
+# create industry keywords
+fintech_keywords <- c('%financ%', '%fintech%', '%banking%', '%asset management%', '%insurance%', '%invest%', '%crypto%', '%bitcoin%')
+health_keywords <- c('%health%', '%wellness%', '%medical%', '%biopharma%', '%fitness%', '%hospital%')
+transport_keywords <- c('%transportation%', '%freight%', '%travel%', '%automotive%', '%logistics%')
+technology_keywords <- c('biotech%', '%technology%', '%industrial%', '%electronics%', '%wearables%', '%3d%', '%devices%', '%manufacturing%')
+software_keywords <- c('%software%', '%artificial intelligence%', '%saas%', '%cloud%', '%iot%', '%internet of things%', '%platform%', '%data%', '%analytics%', '%app%')
+ecommerce_keywords <- c('%e-commerce%', '%retail%', '%ecommerce%')
+food_keywords <- c('%food%', '%beverage%', '%nutrition%', '%agriculture%', '%farm%')
+
+# filter for organizations in the top 7 verticals
+investments$vertical_fintech <- investments$org_industry %like any% fintech_keywords
+investments$vertical_health <- investments$org_industry %like any% health_keywords
+investments$vertical_transport <- investments$org_industry %like any% transport_keywords
+investments$vertical_tech <- investments$org_industry %like any% technology_keywords
+investments$vertical_software <- investments$org_industry %like any% software_keywords
+investments$vertical_ecommerce <- investments$org_industry %like any% ecommerce_keywords
+investments$vertical_food <- investments$org_industry %like any% food_keywords
+
+investments <- investments %>% filter(vertical_health == TRUE |
+                                        vertical_ecommerce == TRUE |
+                                        vertical_transport == TRUE | 
+                                        vertical_tech == TRUE | 
+                                        vertical_fintech == TRUE |
+                                        vertical_software == TRUE |
+                                        vertical_food == TRUE)
+```
+
+
+### Population
+
+Each observation represents a different investment round. Some companies may have completed multiple investment rounds since 2018, however, each funding round will be treated as a separate observation. Each company is run by its own team with a unique board and a unique set of investors with data being collected on a rolling basis. Each round may include investment from multiple investors and these values are summed to avoid violating independence.
+
+### Variables
+
+#### Dependent Variables 
+
+The dependent variable is the amount of money raised in the early-stage round, measured by the amount of seed or pre-seed funding received. 
+
+Based on preliminary assumptions, a higher amount of early-stage funding is correlated with higher chances of survival and profitability for the company. I will use multiple regression to model the amount of money raised in the early-stage round dependent on the following explanatory variables.
+
+
+#### Explanatory Variables
+
+In order to test the primary hypothesis, I use demographic data about each company's founders and leadership team collected by Crunchbase through the variable, Diversity Spotlight.
+Demographic characteristics are measured by creating two explanatory variables, to identify women-led organizations and black-led organizations.
+
+
+#### Hypothesis
+
+Based on previous literature, I hypothesize that companies founded or led by women and black people received less early-stage funding than companies that are neither women- nor black-led. I create a full model where funding date is plotted against money raised during early-stage rounds with indicator variables **Black_Founded**, **Woman_Founded** and their interaction. Reduced models are then compared with the full model to determine if there is a significance in the founder being a Black woman. 
+
+Full Model: 
+
+$\hat{{\textit{transaction_amount_usd}}} = \beta_0 + \beta_11_{TRUE}(BlackFounded) + \beta_21_{TRUE}(WomanFounded) + \beta_31_{TRUE}(BlackFounded)*\beta_41_{TRUE}(WomanFounded)$
+$+ \beta_5funding\_type + \beta_6funding\_date + \beta_71_{TRUE}vertical\_health + \beta_81_{TRUE}vertical\_fintech + \beta_91_{TRUE}vertical\_software + \beta_{10}1_{TRUE}vertical\_food$
+
+Reduced Model: 
+
+$\hat{{\textit{transaction_amount_usd}}} = \beta_0 + \beta_11_{TRUE}(BlackFounded) + \beta_21_{TRUE}(WomanFounded) + \beta_5funding\_type + \beta_6funding\_date$ 
+$+ \beta_71_{TRUE}vertical\_health + \beta_81_{TRUE}vertical\_fintech + \beta_91_{TRUE}vertical\_software + \beta_{10}1_{TRUE}vertical\_food$
+
+
+## Results
+
+In this section, I present the results of my data analysis. I start by cleaning and pre-processing the data to ensure data quality. Next, I develop and assess a handful of linear regression models to address the research question. The section concludes with an interpretation of the model outcomes.
+
+
+### Model Development & Evaluation
+
+In this section, I create a series of linear regression models with different combinations of predictor variables including:
+
+women_founded_led: A binary indicator for organizations founded or led by women.
+
+black_founded_led: A binary indicator for organizations founded or led by Black individuals.
+
+funding_type: The type of funding received: either pre-seed or seed.
+
+funding_year: The year in which the funding round was announced.
+
+region: The geographic region of the organization: between Northeast, Midwest, West, and South.
+
+Industry verticals (vertical_health, vertical_ecommerce, vertical_transport, vertical_tech, vertical_fintech, vertical_software, vertical_food): Binary indicators for organizations belonging to specific industry verticals.
+
+Diversity indicators for additional racial groups (hispanic_latinx_founded_led, s_asian_founded_led, se_asian_founded_led, e_asian_founded_led, s_asian_founded_led, m_eastern_n_african_founded_led).
+
+
+I used Cook's distance to identify and remove influential data points and created new models using the outlier-free dataset.
+
+```{r Create-Models}
+# create a few different models to compare
+
+m1 <- lm(transaction_amount ~ women_founded_led + black_founded_led + funding_type + funding_year + region, investments)
+m2 <- lm(transaction_amount ~ women_founded_led + black_founded_led + funding_type + funding_year + region + vertical_health + vertical_ecommerce + 
+    vertical_transport + vertical_tech + vertical_fintech + vertical_software + vertical_food, investments)
+m3 <- lm(transaction_amount ~ women_founded_led + black_founded_led + funding_type + funding_year + region + vertical_health + vertical_ecommerce + 
+    vertical_transport + vertical_tech + vertical_fintech + vertical_software + vertical_food + hispanic_latinx_founded_led + s_asian_founded_led + se_asian_founded_led + e_asian_founded_led + s_asian_founded_led + m_eastern_n_african_founded_led, investments)
+m4 <- lm(transaction_amount ~ women_founded_led + black_founded_led + funding_type + funding_year + region + hispanic_latinx_founded_led + s_asian_founded_led + se_asian_founded_led + e_asian_founded_led + s_asian_founded_led + m_eastern_n_african_founded_led, investments)
+
+
+# plot outliers
+par(mfrow=c(1,1))
+cutoff1 <- 4/((nrow(investments)-length(m1$coefficients)-2))
+cutoff2 <- 4/((nrow(investments)-length(m2$coefficients)-2))
+cutoff3 <- 4/((nrow(investments)-length(m3$coefficients)-2))
+cutoff4 <- 4/((nrow(investments)-length(m4$coefficients)-2))
+# outlier_plots <- c(plot(m1, which=4, cook.levels = cutoff),
+#                    plot(m2, which=4, cook.levels = cutoff),
+#                    plot(m3, which=4, cook.levels = cutoff),
+#                    plot(m4, which=4, cook.levels = cutoff))
+
+# remove outliers
+outlier_indices <- c(11131,16611,16803)
+investments_no_out <- investments[-outlier_indices,]
+
+# rerun models without outliers
+m1_no_out <- lm(transaction_amount ~ women_founded_led + black_founded_led + funding_type + funding_year + region, investments_no_out)
+m2_no_out <- lm(transaction_amount ~ women_founded_led + black_founded_led + funding_type + funding_year + region + vertical_health + vertical_ecommerce + 
+    vertical_transport + vertical_tech + vertical_fintech + vertical_software + vertical_food, investments_no_out)
+m3_no_out <- lm(transaction_amount ~ women_founded_led + black_founded_led + funding_type + funding_year + region + vertical_health + vertical_ecommerce + 
+    vertical_transport + vertical_tech + vertical_fintech + vertical_software + vertical_food + hispanic_latinx_founded_led + s_asian_founded_led + se_asian_founded_led + e_asian_founded_led + s_asian_founded_led + m_eastern_n_african_founded_led, investments_no_out)
+m4_no_out <- lm(transaction_amount ~ women_founded_led + black_founded_led + funding_type + funding_year + region + hispanic_latinx_founded_led + s_asian_founded_led + se_asian_founded_led + e_asian_founded_led + s_asian_founded_led + m_eastern_n_african_founded_led, investments_no_out)
+```
+
+Next, I use the `anova` function to compare the fit of the 4 linear models.
+
+```{r Compare-Models}
+# use anova to choose model with best fit
+anova(m1_no_out,m2_no_out,m3_no_out,m4_no_out)
+
+# save adjusted r^2 of each model
+adj_r_squared_m2 <- summary(m2_no_out)$adj.r.squared
+adj_r_squared_m4 <- summary(m4_no_out)$adj.r.squared
+```
+
+With a p-value of less than 2.2e-16, I conclude that models 2 and 4 explain a significantly greater amount of variance in the data than models 1 and 3.
+
+`r cat("Adjusted R^2 for m2:", adj_r_squared_m2, "\nAdjusted R^2 for m4:", adj_r_squared_m4)`
+Model 2 has a slightly better fit than Model 4.
+
+Below I compare the diagnostic plots of Models 2 and 4 in order to assess the model assumptions.
+
+```{r Compare-Diagnostic-Plots, echo=FALSE}
+# display regression diagnostic plots and use them to evaluate the top 2 models and compare them to each other
+
+par(mfrow=c(1,2))
+
+# residual vs fitted
+plot(m2_no_out,1)
+title(main='Model 2')
+plot(m4_no_out,1)
+title(main='Model 4')
+
+# qq
+plot(m2_no_out,2)
+title(main='Model 2')
+plot(m4_no_out,2)
+title(main='Model 4')
+
+# scale-location
+plot(m2_no_out,3)
+title(main='Model 2')
+plot(m4_no_out,3)
+title(main='Model 4')
+
+# residual vs leverage
+plot(m2_no_out,5)
+title(main='Model 2')
+plot(m4_no_out,5)
+title(main='Model 4')
+
+# reset
+par(mfrow = c(1,1))
+```
+
+The Residual vs Fitted plots of both models have a slight fan shape and the Q-Q plots of both the models are right-skewed indicating the data may not be normally distributed.
+
+These observations alone are enough to suggest that the data will need to be transformed before use but I test for heteroscedasticity in both the models using the Breusch-Pagan test for confirmation.
+
+```{r Test-for-Heteroscedasticity}
+# bp test for heteroscedasticity in both models
+bptest(m2_no_out)
+bptest(m4_no_out)
+```
+
+Heteroscedasticity is confirmed with the BP test so I use logarithmic transformation to stabilize the variance and refit the models using the transformed response variable.
+
+```{r Log-Transformation}
+# add transformed response variable to the dataset
+investments_no_out$log_transaction_amount <- log(investments_no_out$transaction_amount)
+
+# refit the models
+m2_no_out_transformed <- lm(log_transaction_amount ~ women_founded_led + black_founded_led + funding_type + funding_year + region + vertical_health + vertical_ecommerce + vertical_transport + vertical_tech + vertical_fintech + vertical_software + vertical_food, investments_no_out)
+m4_no_out_transformed <- lm(log_transaction_amount ~ women_founded_led + black_founded_led + funding_type + funding_year + region + hispanic_latinx_founded_led + s_asian_founded_led + se_asian_founded_led + e_asian_founded_led + s_asian_founded_led + m_eastern_n_african_founded_led, investments_no_out)
+
+# compare the fit of the transformed models
+adj_r_squared_m2_transformed <- summary(m2_no_out_transformed)$adj.r.squared
+adj_r_squared_m4_transformed <- summary(m4_no_out_transformed)$adj.r.squared
+cat("Adjusted R^2 for Model 2 (transformed):", adj_r_squared_m2_transformed, "\nAdjusted R^2 for Model 4 (transformed):", adj_r_squared_m4_transformed)
+```
+
+The models with transformed response variables show better fit than the original models.
+
+```{r Compare-Diagnostic-Plots-Transformed-Data, echo=FALSE}
+par(mfrow=c(1,2))
+
+# residual vs fitted
+plot(m2_no_out_transformed,1)
+title(main='Model 2')
+plot(m4_no_out_transformed,1)
+title(main='Model 4')
+
+# qq
+plot(m2_no_out_transformed,2)
+title(main='Model 2')
+plot(m4_no_out_transformed,2)
+title(main='Model 4')
+
+# scale-location
+plot(m2_no_out_transformed,3)
+title(main='Model 2')
+plot(m4_no_out_transformed,3)
+title(main='Model 4')
+
+# residual vs leverage
+plot(m2_no_out_transformed,5)
+title(main='Model 2')
+plot(m4_no_out_transformed,5)
+title(main='Model 4')
+
+# reset
+par(mfrow = c(1,1))
+```
+
+All 4 diagnostic plots for both models give me confidence in moving forward with the linear model but I test for heteroscedasticity using the Breusch-Pagan test to confirm my observation that the transformation was successful.
+
+```{r, Test-for-Heteroscedasticity-Transformed-Data}
+# retest for heteroscedasticity
+bptest(m2_no_out_transformed)
+bptest(m4_no_out_transformed)
+```
+
+Model 2 has multiple predictors related to organization verticals while Model 4 considers several ethnicities. For the purpose of this analysis, I favour Model 2, the model with the better fit. I rename this model the Primary Model. I also consider whether an interaction term improves the fit of the model.
+
+```{r Finalize-Model}
+# rename model
+primary_model <- m2_no_out_transformed
+
+# create reduced and full models for each industry
+
+# create model with interaction term
+primary_model_interaction <- lm(log_transaction_amount ~ women_founded_led + black_founded_led + women_founded_led*black_founded_led + funding_type + funding_year + region + vertical_health + vertical_ecommerce + vertical_transport + vertical_tech + vertical_fintech + vertical_software + vertical_food, investments_no_out)
+
+# compare models
+anova(primary_model,primary_model_interaction)
+p_val_primary_vs_interaction <- round(anova(primary_model,primary_model_interaction)$`Pr(>F)`[2],4)
+```
+
+The p-value of `r p_val_primary_vs_interaction` is not significantly small but I keep the interaction term for the sake of the research question. My final step in validating the model is to test for multicollinearity.
+
+```{r Test-for-Multicollinearity, message=FALSE}
+# test for multicollinearity
+vif_values <- vif(primary_model_interaction, type = 'predictor')
+vif_table <- data.frame(
+  Predictors = rownames(vif_values),
+  VIF = round(vif_values[1],2)
+)
+rownames(vif_table) <- NULL
+vif_table
+```
+The low Generalized Variance Inflation Factors (GVIF) for all the predictors in this model indicates that there is little to no multicollinearity among the predictors and I can confidently interpret the coefficients of the predictors.
+
+The final model considers gender, race, funding type, funding year, company headquarter region, and vertical as predictors of early-stage funding with an adjusted R squared
+```{r Summarize-Model-Results, echo=FALSE}
+# summarize final model results
+summary(primary_model_interaction)
+cat(paste("Adjusted R-squared:", summary(primary_model_interaction)$adj.r.squared))
+```
+
+```{r Interpret-Model-Results, echo=FALSE}
+# interpret the model results
+# calculate the percentage change that each predictor causes in our model
+difference_women_founded_led <- as.numeric((exp(coef(primary_model_interaction)["women_founded_ledTRUE"])-1)*100)
+difference_black_founded_led <- as.numeric((exp(coef(primary_model_interaction)["black_founded_ledTRUE"])-1)*100)
+difference_funding_type_seed <- as.numeric((exp(coef(primary_model_interaction)["funding_typeSeed"])-1)*100)
+difference_funding_year <- as.numeric((exp(coef(primary_model_interaction)["funding_year"])-1)*100)
+
+difference_health <- as.numeric((exp(coef(primary_model_interaction)["vertical_healthTRUE"])-1)*100)
+difference_ecommerce <- as.numeric((exp(coef(primary_model_interaction)["vertical_ecommerceTRUE"])-1)*100)
+difference_fintech <- as.numeric((exp(coef(primary_model_interaction)["vertical_fintechTRUE"])-1)*100)
+difference_software <- as.numeric((exp(coef(primary_model_interaction)["vertical_softwareTRUE"])-1)*100)
+difference_food <- as.numeric((exp(coef(primary_model_interaction)["vertical_foodTRUE"])-1)*100)
+```
+
+### Interpretation of Results
+After interpreting the transformed model results, I notice the following on average at a 99% confidence level:
+
+1) Companies that are black-founded or -led received `r abs(round(difference_black_founded_led))`% `r if(round(difference_black_founded_led)>0) {"more"} else {"less"}` early-stage funding.
+
+2) Companies received `r abs(round(difference_funding_type_seed))`% `r if(round(difference_funding_type_seed)>0) {"more"} else {"less"}` early-stage funding during a seed round.
+
+3) Companies received `r abs(round(difference_funding_year))`% `r if(round(difference_funding_year)>0) {"more"} else {"less"}` funding for each additional year after 2018 that the round was raised.
+
+4) Fintech companies received `r abs(round(difference_fintech))`% `r if(round(difference_fintech)>0) {"more"} else {"less"}` early-stage funding.
+
+5) Software companies received `r abs(round(difference_software))`% `r if(round(difference_software)>0) {"more"} else {"less"}` early-stage funding.
+
+6) Food & Beverage companies received `r abs(round(difference_food))`% `r if(round(difference_food)>0) {"more"} else {"less"}` early-stage funding.
+
+7) Healthtech companies received `r abs(round(difference_health))`% `r if(round(difference_health)>0) {"more"} else {"less"}` early-stage funding.
+
+
+Additionally, I notice the following:
+
+1) Companies that are woman-founded or -led received `r abs(round(difference_women_founded_led))`% `r if(round(difference_women_founded_led)>0) {"more"} else {"less"}` early-stage funding on average at a 95% confidence interval.
+
+2) The difference in early-stage funding received by companies that are both black- and woman-founded or -led is not statistically significant.
+
+
+This analysis not only demonstrates that race is a statistically significant predictor of early-stage funding received by companies between 2018 and 2023, but it further demonstrates that it can be a stronger predictor than gender, geographic region, and - in some cases - vertical or industry. Less access to early-stage venture capital funding requires founders to either bootstrap their ventures, raise money from friends and family, or seek other forms of funding such as grants and loans. For black people who have been systematically disenfranchised in the U.S., there may not be enough capital from risk tolerant people in their network and they may be less likely to be approved by a small business loan^4^. For black founders, as well as founders from other minority racial and ethnic groups in the U.S., grants play a significant role in combating exclusivity in venture funding by addressing the systemic barriers that hinder these founders. Future research is needed to understand deeper the extent to which these grants have created a more equitable startup environment.
+
+
+## References
+
+1. Accenture. "Bridging the Black founders venture capital gap." Accenture, 16 February 2022, https://www.accenture.com/us-en/insights/technology/black-founders.
+
+2. TechCrunch. "Crunchbase raises $30M more to double down on its ambition to be a LinkedIn for company data." TechCrunch, 31 October 2019, https://techcrunch.com/2019/10/31/crunchbase-raises-30m-more-to-double-down-on-its-ambition-to-be-a-linkedin-for-company-data/.
+
+3. Diane Wong. "Reflecting On Out Progress: One Year Since The Launch Of Diversity Spotlight." Crunchbase, 16 August 2021, https://about.crunchbase.com/blog/reflecting-on-one-year-of-diversity-spotlight/#:~:text=Diversity%20Spotlight%20data%20comes%20from,the%20appropriate%20Diversity%20Spotlight%20tags.
+
+4. Rohit Arora. "Why Black-Owned Businesses Struggle To Get Small Business Loans." Forbes, 24 November 2020, https://www.forbes.com/sites/rohitarora/2020/11/24/why-black-owned-businesses-struggle-to-get-small-business-loans/.

@@ -23,7 +23,7 @@ library(lmtest)
 library(car)
 library(DescTools)
 library(tinytex)
-investments<-read_csv("~/discrimination_in_venture/temp_data_2018-2023/investments_raw.csv", show_col_types = FALSE)
+investments<-read_csv("~/ZolekaMosiahPortfolio/temp_data_2018-2023/investments_raw.csv", show_col_types = FALSE)
 ```
 ## Abstract
 The aim of this analysis is to assess whether race and gender disparities in the United States are manifested in the allocation of venture capital funding through the of early-stage funding received by founders based on their race and gender between 2018 and 2023. The findings of this analysis of 21,238 startups indicate a statistically significant difference in the amount of early-stage funding received by startups depending on the demographic of their founding and leadership teams. More specifically, companies that are black-founded or -led receive 21% less early-stage funding than their counterparts. Surprisingly, companies founded or led by women receive 8% more early-stage funding than their counterparts. In summation, this analysis provides supplementary evidence to the increasing awareness of the ways in which systemic inequality affects black founders. The model used for this analysis has an adjusted R-squared of 0.24. The model doesn't account for more specific, possibly influential company information like company age, number of founders, or founder experience could be one of the reasons for this low value. However, the results are still worth interpreting as they shed light on some of the disparities in venture capital and, given the restricted availability of private company data for this project, the results are still of value.

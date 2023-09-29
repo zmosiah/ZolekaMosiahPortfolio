@@ -1,0 +1,153 @@
+---
+title: "2023 Analysis"
+author: "Zoleka Mosiah"
+date: "09/17/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readr)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(moderndive)
+library(ggfortify)
+library(purrr)
+library(data.table)
+library(lmtest)
+investments_no_out
+```
+
+
+```{r}
+# create a grouped dataset by quarter
+investments_by_quarter <- investments_no_out %>%
+  group_by(funding_year, funding_quarter) %>%
+  summarise(median_transaction_amount = median(transaction_amount)) %>%
+  mutate(Company_Category = 'All') %>%
+  ungroup()
+
+# create combined factor for ordering
+investments_by_quarter$quarter_order <- factor(
+  paste(investments_by_quarter$funding_year, investments_by_quarter$funding_quarter),
+  levels = unique(paste(investments_by_quarter$funding_year, investments_by_quarter$funding_quarter))
+)
+
+# filter for black-founded companies
+black_investments_by_quarter <- investments_no_out %>%
+  filter(black_founded_led == TRUE) %>%
+  group_by(funding_year, funding_quarter) %>%
+  summarise(median_transaction_amount = median(transaction_amount)) %>%
+  mutate(Company_Category = 'Black-founded/-led') %>%
+  ungroup()
+
+black_investments_by_quarter$quarter_order <- factor(
+  paste(black_investments_by_quarter$funding_year, black_investments_by_quarter$funding_quarter),
+  levels = unique(paste(black_investments_by_quarter$funding_year, black_investments_by_quarter$funding_quarter))
+)
+
+investments_by_quarter <- bind_rows(investments_by_quarter, black_investments_by_quarter)
+investments_by_quarter <- investments_by_quarter %>%
+  select(median_transaction_amount, Company_Category, quarter_order)
+
+```
+
+```{r message=FALSE}
+
+plot <- ggplot(data = investments_by_quarter, aes(x = quarter_order, y=median_transaction_amount, color=Company_Category, group=Company_Category), linewidth=0.9) +
+  #geom_point() +
+  geom_line() +
+  labs(
+    x = 'Quarterly Period',
+    y = 'Median Transaction Amount',
+    title = 'Median Early-Stage Funding Trends (2018 - 2023)'
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.background = element_rect(fill = 'transparent'),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank()) +
+
+# rename the x axis labels
+  scale_x_discrete(labels = function(x) {
+    year <- substr(x, 3, 4)
+    quarter <- substr(x, 6, 6)
+    paste("Q", quarter, " '", year, sep = "")
+  }) +
+
+# rename the y labels
+  scale_y_continuous(labels = function(y) {
+    paste0('$',
+           round(y / 1e6, 2),
+           'M')
+  }) +
+  
+  # add legend
+  scale_color_manual(
+    name = 'Founder Category',
+    values = c('All' = '#281e5d',
+               'Black-founded/-led' = '#2832c2')
+    ) 
+
+plot
+
+png('~/discrimination_in_venture/median_trends_2018_2023.png',
+    width = 600, height = 400, units = 'px', pointsize = 12)
+plot
+dev.off()
+```
+```{r}
+# by industry
+plot <- ggplot() +
+  #geom_point() +
+  geom_line(data = investments_by_quarter, 
+            aes(x = quarter_order, y = median_transaction_amount, group=1), 
+            colour = '#281e5d',
+            linewidth = 0.9) +
+  geom_line(data = black_investments_by_quarter, 
+            aes(x = quarter_order, y = median_transaction_amount, group=1), 
+            colour='#2832c2',
+            linewidth = 0.9) +
+  labs(
+    x = 'Quarterly Period',
+    y = 'Median Transaction Amount',
+    title = 'Median Early-Stage Funding Trends (2018 - 2023)'
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.background = element_rect(fill = 'transparent'),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank()) +
+
+# rename the x axis labels
+  scale_x_discrete(labels = function(x) {
+    year <- substr(x, 3, 4)
+    quarter <- substr(x, 6, 6)
+    paste("Q", quarter, " '", year, sep = "")
+  }) +
+
+# rename the y labels
+  scale_y_continuous(labels = function(y) {
+    paste0('$',
+           round(y / 1e6, 2),
+           'M')
+  }) +
+  
+  # add legend
+  scale_color_manual(
+    name = 'Founder Category',
+    values = c('All seed investments' = 'indigo',
+               'Investment into Black-founded/-led companies' = '#2832c2')
+    )
+
+plot
+
+png('~/discrimination_in_venture/median_trends_2018_2023.png',
+    width = 600, height = 400, units = 'px', pointsize = 12)
+plot
+dev.off()
+```
+

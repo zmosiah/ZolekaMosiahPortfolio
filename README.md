@@ -1,1 +1,6 @@
-This is my work-in-progress portfolio. We all start somewhere.
+# Welcome
+
+Hi, I'm Zoleka
+
+### Projects
+[Venture Capital Bias Analysis](https://zmosiah.github.io/ZolekaMosiahPortfolio/Bridging_the_Gap/)
